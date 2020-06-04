@@ -1,7 +1,21 @@
 
 use std::alloc::{GlobalAlloc, Layout};
 
-use crate::pg_sys::{CurrentMemoryContext, MemoryContextAlloc, MemoryContextAllocZero, pfree, repalloc};
+use crate::pg_sys::{
+    CurrentMemoryContext,
+    MemoryContext,
+    MemoryContextAlloc,
+    MemoryContextAllocZero,
+    pfree,
+    repalloc
+};
+
+
+pub unsafe fn memory_context_switch_to(context: MemoryContext) -> MemoryContext {
+    let old = CurrentMemoryContext;
+    CurrentMemoryContext = context;
+    old
+}
 
 #[global_allocator]
 static GLOBAL: PallocAllocator = PallocAllocator;
