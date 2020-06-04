@@ -9,7 +9,6 @@
 // };
 
 pub use postgres_headers_rs as pg_sys;
-
 pub mod datum;
 pub mod elog;
 pub mod palloc;
@@ -21,14 +20,15 @@ pub type FunctionCallInfoData = pg_sys::FunctionCallInfoBaseData;
 
 #[macro_export]
 macro_rules! pg_fn {
-    (pub fn $name:ident( $($arg:ident : $typ:ty),* $(,)? ) $(-> $ret:ty)? $body:block) => {
+    (pub fn $name:ident($($arg:ident : $typ:ty),* $(,)? $(; $fcinfo: ident)?) $(-> $ret:ty)? $body:block) => {
         #[no_mangle]
         pub extern "C" fn $name(fcinfo: $crate::pg_sys::FunctionCallInfo) -> $crate::pg_sys::Datum {
+            use std::panic::{catch_unwind, AssertUnwindSafe};
             // use a direct deref since this must always be set, and we can't risk a panic
             let fcinfo = unsafe { &mut *fcinfo };
 
             // guard against panics in the rust code so we don't unwind into pg
-            let result: Result<Option<$crate::pg_sys::Datum>, _> = std::panic::catch_unwind(|| {
+            let result: Result<Option<$crate::pg_sys::Datum>, _> = catch_unwind(AssertUnwindSafe(|| {
                 $(
                     let $arg: $typ;
                 )*
@@ -41,6 +41,7 @@ macro_rules! pg_fn {
                         $arg = <$typ as crate::datum::FromOptionalDatum>::from_optional_datum(datum);
                     )*
                 }
+                $(let $fcinfo: &mut $crate::FunctionCallInfoData = fcinfo;)?
                 #[allow(unused_variables)]
                 let res = (|| { $body })();
                 $(
@@ -48,7 +49,7 @@ macro_rules! pg_fn {
                 )?
                 #[allow(unreachable_code)]
                 None
-            });
+            }));
             match result {
                 Ok(Some(datum)) => {
                     fcinfo.isnull = false;
@@ -180,6 +181,12 @@ mod tests {
                 Some(b) => a + b,
                 None => a,
             }
+        }
+    }
+
+    crate::pg_fn!{
+        pub fn compile_test_fcinfo(; fcinfo) -> i16 {
+            fcinfo.nargs
         }
     }
 }
