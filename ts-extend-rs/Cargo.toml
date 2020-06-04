@@ -1,5 +1,5 @@
 [package]
-name = "ts-extend-rs"
+name = "ts-extend"
 version = "0.1.0"
 authors = ["Joshua Lockerman <josh@timescale.com>"]
 edition = "2018"
