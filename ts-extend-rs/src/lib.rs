@@ -35,10 +35,10 @@ macro_rules! pg_fn {
                 {
                     #[allow(unused_variables)]
                     #[allow(unused_mut)]
-                    let mut args = crate::get_args(&*fcinfo);
+                    let mut args = $crate::get_args(&*fcinfo);
                     $(
                         let datum = args.next().expect("not enough arguments for function");
-                        $arg = <$typ as crate::datum::FromOptionalDatum>::from_optional_datum(datum);
+                        $arg = <$typ as $crate::Datum::FromOptionalDatum>::from_optional_datum(datum);
                     )*
                 }
                 $(let $fcinfo: &mut $crate::FunctionCallInfoData = fcinfo;)?
