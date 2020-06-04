@@ -1,0 +1,8 @@
+[profile.release]
+debug = true
+
+[workspace]
+members = [
+    "postgres-headers-rs",
+    "ts-extend-rs",
+]

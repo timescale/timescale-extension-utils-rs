@@ -1,0 +1,8 @@
+[package]
+name = "ts-extend-rs"
+version = "0.1.0"
+authors = ["Joshua Lockerman <josh@timescale.com>"]
+edition = "2018"
+
+[dependencies]
+postgres-headers-rs = {version = "*", path = "../postgres-headers-rs"}
