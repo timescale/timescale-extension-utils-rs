@@ -10,7 +10,30 @@ use crate::pg_sys::{
     repalloc
 };
 
+/// run code in a given memory context, switching back to the original context
+/// on exit, through either return or panic
+pub unsafe fn in_context<T, F>(context: MemoryContext, f: F) -> T
+where F: FnOnce() -> T {
+    // we need a variable her so the guard lives to the end of this scope
+    let _guard = MemoryContextGuard(context);
+    f()
+}
 
+/// this struct will swap the current memory context to the one it contains
+/// when it is dropped. it is recommended that `in_context` is used intead of
+/// using this directly
+pub struct MemoryContextGuard(pub MemoryContext);
+impl Drop for MemoryContextGuard {
+    fn drop(&mut self) {
+        unsafe {
+            memory_context_switch_to(self.0);
+        }
+    }
+}
+
+/// switch `CurrentMemoryContext` to a given context, returning the old memory
+/// contect. It is recommended that `in_context()` be used instead, as that
+/// function handles switching the memory context back on panic.
 pub unsafe fn memory_context_switch_to(context: MemoryContext) -> MemoryContext {
     let old = CurrentMemoryContext;
     CurrentMemoryContext = context;
