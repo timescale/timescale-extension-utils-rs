@@ -10695,11 +10695,7 @@ extern "C" {
 extern "C" {
     pub static mut signgam: ::std::os::raw::c_int;
 }
-pub const FP_NAN: _bindgen_ty_8 = 0;
-pub const FP_INFINITE: _bindgen_ty_8 = 1;
-pub const FP_ZERO: _bindgen_ty_8 = 2;
-pub const FP_SUBNORMAL: _bindgen_ty_8 = 3;
-pub const FP_NORMAL: _bindgen_ty_8 = 4;
+
 pub type _bindgen_ty_8 = u32;
 extern "C" {
     pub fn strlcat(
