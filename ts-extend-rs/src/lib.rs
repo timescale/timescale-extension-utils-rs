@@ -20,69 +20,137 @@ pub type FunctionCallInfoData = pg_sys::FunctionCallInfoBaseData;
 
 #[macro_export]
 macro_rules! pg_fn {
-    (pub fn $name:ident($($arg:ident : $typ:ty),* $(,)? $(; $fcinfo: ident)?) $(-> $ret:ty)? $body:block) => {
-        #[no_mangle]
+    ($(pub fn $name:ident($($arg:ident : $typ:ty),* $(,)? $(; $fcinfo: ident)?) $(-> $ret:ty)? $body:block)+) => {
+        $(#[no_mangle]
         pub extern "C" fn $name(fcinfo: $crate::pg_sys::FunctionCallInfo) -> $crate::pg_sys::Datum {
-            use std::panic::{catch_unwind, AssertUnwindSafe};
             // use a direct deref since this must always be set, and we can't risk a panic
             let fcinfo = unsafe { &mut *fcinfo };
-
-            // guard against panics in the rust code so we don't unwind into pg
-            let result: Result<Option<$crate::pg_sys::Datum>, _> = catch_unwind(AssertUnwindSafe(|| {
-                $(
-                    let $arg: $typ;
-                )*
-                {
-                    #[allow(unused_variables)]
-                    #[allow(unused_mut)]
-                    let mut args = $crate::get_args(&*fcinfo);
-                    $(
-                        let datum = args.next().expect("not enough arguments for function");
-                        $arg = <$typ as $crate::datum::FromOptionalDatum>::from_optional_datum(datum);
-                    )*
-                }
-                $(let $fcinfo: &mut $crate::FunctionCallInfoData = fcinfo;)?
-                #[allow(unused_variables)]
-                let res = (|| { $body })();
-                $(
-                    return <$ret as $crate::datum::ToOptionalDatum>::to_optional_datum(res);
-                )?
-                #[allow(unreachable_code)]
-                None
-            }));
-            match result {
-                Ok(Some(datum)) => {
-                    fcinfo.isnull = false;
-                    return datum;
-                },
-                Ok(None) => {
-                    fcinfo.isnull = true;
-                    return 0;
-                },
-                Err(err) => {
-                    use std::sync::atomic::{
-                        compiler_fence,
-                        Ordering,
-                    };
-                    use $crate::elog::Level::Error;
-                    fcinfo.isnull = true;
-
-                    // setup to jump back to postgres code
-                    compiler_fence(Ordering::SeqCst);
-                    if let Some(msg) = err.downcast_ref::<&'static str>() {
-                        $crate::elog!(Error, "panic executing Rust '{}': {}", stringify!($name), msg);
-                    }
-
-                    if let Some(msg) = err.downcast_ref::<String>() {
-                        $crate::elog!(Error, "panic executing Rust '{}': {}", stringify!($name), msg);
-                    }
-
-                    $crate::elog!(Error, "panic executing Rust '{}'", stringify!(#func_name));
-                    unreachable!("log should have longjmped above, this is a bug in ts-extend-rs");
-                },
-            }
-        }
+            $crate::pg_fn_body!(fcinfo; $name( $($arg:$typ,)*  $(; $fcinfo)? ) $(-> $ret)? $body );
+        })+
     };
+}
+
+#[macro_export]
+macro_rules! pg_agg {
+    (
+        $(pub fn $name:ident($state:ident : Option<Pox<$styp:ty>> $(, $arg:ident : $typ:ty)* $(,)? $(; $fcinfo: ident)?) $(-> $ret:ty)?
+            $body:block)+
+    ) => {
+        $(
+            #[no_mangle]
+            pub extern "C" fn $name(fcinfo: $crate::pg_sys::FunctionCallInfo) -> $crate::pg_sys::Datum {
+                use $crate::pg_sys::{AggCheckCallContext, MemoryContext};
+                // use a direct deref since this must always be set, and we can't risk a panic
+                let fcinfo = unsafe { &mut *fcinfo };
+
+                let mut agg_ctx: MemoryContext = std::ptr::null_mut();
+                if unsafe {AggCheckCallContext(fcinfo, &mut agg_ctx) == 0} {
+                    $crate::elog!($crate::elog::Level::Error, concat!("must call ", stringify!($name) ," as an aggregate"))
+                }
+
+                unsafe {
+                    $crate::palloc::in_context(agg_ctx, || {
+                        $crate::pg_fn_body!(fcinfo; $name(@$state:Option<Pox<$styp>>, $($arg:$typ,)*  $(; $fcinfo)? ) $(-> $ret)? $body );
+                    })
+                }
+            }
+        )+
+    };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! pg_fn_body {
+    ($fc:ident; $name:ident($(@$state:ident : Option<Pox<$styp:ty>>,)? $($arg:ident : $typ:ty,)* $(; $fcinfo:ident)? ) $(-> $ret:ty)? $body:block) => {
+        use std::panic::{catch_unwind, AssertUnwindSafe};
+        #[allow(unused_imports)]
+        use $crate::{
+            datum::FromOptionalDatum,
+            elog::Level::Error,
+            palloc::Pox,
+        };
+        // guard against panics in the rust code so we don't unwind into pg
+        let result: Result<Option<$crate::pg_sys::Datum>, _> = catch_unwind(AssertUnwindSafe(|| {
+            $(
+                let $state: Option<Pox<$styp>>;
+            )?
+            $(
+                let $arg: $typ;
+            )*
+            {
+                #[allow(unused_variables)]
+                #[allow(unused_mut)]
+                let mut args = $crate::get_args(&*$fc);
+                $(
+                    let datum = args.next().expect("not enough arguments for aggregate state");
+                    $state = <Option<*mut $styp> as FromOptionalDatum>::from_optional_datum(datum)
+                        .map(|p| Pox::from_raw_unchecked(p));
+                )?
+                $(
+                    let datum = args.next().expect("not enough arguments for function");
+                    $arg = <$typ as FromOptionalDatum>::from_optional_datum(datum);
+                )*
+            }
+            $(let $fcinfo: &mut $crate::FunctionCallInfoData = $fc;)?
+            #[allow(unused_variables)]
+            let res = (|| { $body })();
+            $(
+                return <$ret as $crate::datum::ToOptionalDatum>::to_optional_datum(res);
+            )?
+            #[allow(unreachable_code)]
+            None
+        }));
+        match result {
+            Ok(Some(datum)) => {
+                $fc.isnull = false;
+                return datum;
+            },
+            Ok(None) => {
+                $fc.isnull = true;
+                return 0;
+            },
+            Err(err) => {
+                use std::sync::atomic::{
+                    compiler_fence,
+                    Ordering,
+                };
+                $fc.isnull = true;
+
+                // setup to jump back to postgres code
+                compiler_fence(Ordering::SeqCst);
+                if let Some(msg) = err.downcast_ref::<&'static str>() {
+                    $crate::elog!(Error, "panic executing Rust '{}': {}", stringify!($name), msg);
+                }
+
+                if let Some(msg) = err.downcast_ref::<String>() {
+                    $crate::elog!(Error, "panic executing Rust '{}': {}", stringify!($name), msg);
+                }
+
+                $crate::elog!(Error, "panic executing Rust '{}'", stringify!(#func_name));
+                unreachable!("log should have longjmped above, this is a bug in ts-extend-rs");
+            },
+        }
+    }
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! setup_fn_args {
+    ($fc:ident; $($arg:ident : $typ:ty),* $(,)? $(; $fcinfo: ident)?) => {
+        $(
+            let $arg: $typ;
+        )*
+        {
+            #[allow(unused_variables)]
+            #[allow(unused_mut)]
+            let mut args = $crate::get_args(&*$fc);
+            $(
+                let datum = args.next().expect("not enough arguments for function");
+                $arg = <$typ as $crate::datum::FromOptionalDatum>::from_optional_datum(datum);
+            )*
+        }
+        $(let $fcinfo: &mut $crate::FunctionCallInfoData = $fc;)?
+    }
 }
 
 pub fn get_args<'a>(
@@ -187,6 +255,26 @@ mod tests {
     crate::pg_fn!{
         pub fn compile_test_fcinfo(; fcinfo) -> i16 {
             fcinfo.nargs
+        }
+    }
+
+    crate::pg_fn!{
+        pub fn compile_test_multi0(a: u32, b: u32; fcinfo) -> u32 {
+            a + b + fcinfo.nargs as u32
+        }
+
+        pub fn compile_test_multi1() -> u64 {
+            0
+        }
+    }
+
+    crate::pg_agg!{
+        pub fn compile_test_sfunc(state: Option<Pox<usize>>) -> Option<Pox<usize>> {
+            state
+        }
+
+        pub fn compile_test_final(state: Option<Pox<usize>>) -> usize {
+            state.map(|s| *s).unwrap_or_else(|| 0)
         }
     }
 }

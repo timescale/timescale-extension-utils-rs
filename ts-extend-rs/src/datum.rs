@@ -1,7 +1,10 @@
 
 use std::mem::size_of;
 
-use crate::pg_sys::Datum;
+use crate::{
+    palloc::Pox,
+    pg_sys::Datum
+};
 
 pub trait FromOptionalDatum {
     fn from_optional_datum(datum: Option<Datum>) -> Self;
@@ -92,6 +95,13 @@ impl<T> ToDatum for *const T {
         self as Datum
     }
 }
+
+impl<T> ToDatum for Pox<T> {
+    fn to_datum(self) -> Datum {
+        Pox::into_raw(self) as Datum
+    }
+}
+
 
 impl FromDatum for f32 {
     fn from_datum(datum: Datum) -> Self {
