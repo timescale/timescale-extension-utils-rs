@@ -46,6 +46,12 @@ impl<T: ?Sized> From<Box<T>> for Pox<T> {
     }
 }
 
+impl<T> From<T> for Pox<T> {
+    fn from(val: T) -> Self {
+        Pox::new(val)
+    }
+}
+
 impl<T: ?Sized> std::ops::Deref for Pox<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
