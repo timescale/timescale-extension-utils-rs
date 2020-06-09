@@ -1,12 +1,11 @@
 
-// use std::{
-//     mem,
-//     os::raw::c_int,
-//     sync::atomic::{
-//         compiler_fence,
-//         Ordering,
-//     },
-// };
+use std::{
+    mem,
+    sync::atomic::{
+        compiler_fence,
+        Ordering,
+    },
+};
 
 pub use postgres_headers_rs as pg_sys;
 pub mod datum;
@@ -24,8 +23,12 @@ macro_rules! pg_fn {
         $(#[no_mangle]
         pub extern "C" fn $name(fcinfo: $crate::pg_sys::FunctionCallInfo) -> $crate::pg_sys::Datum {
             // use a direct deref since this must always be set, and we can't risk a panic
-            let fcinfo = unsafe { &mut *fcinfo };
-            $crate::pg_fn_body!(fcinfo; $name( $($arg:$typ,)*  $(; $fcinfo)? ) $(-> $ret)? $body );
+            unsafe {
+                $crate::palloc::in_context($crate::pg_sys::CurrentMemoryContext, || {
+                    let fcinfo = &mut *fcinfo;
+                    $crate::pg_fn_body!(fcinfo; $name( $($arg:$typ,)*  $(; $fcinfo)? ) $(-> $ret)? $body );
+                })
+            }
         })+
     };
 }
@@ -133,26 +136,6 @@ macro_rules! pg_fn_body {
     }
 }
 
-#[macro_export]
-#[doc(hidden)]
-macro_rules! setup_fn_args {
-    ($fc:ident; $($arg:ident : $typ:ty),* $(,)? $(; $fcinfo: ident)?) => {
-        $(
-            let $arg: $typ;
-        )*
-        {
-            #[allow(unused_variables)]
-            #[allow(unused_mut)]
-            let mut args = $crate::get_args(&*$fc);
-            $(
-                let datum = args.next().expect("not enough arguments for function");
-                $arg = <$typ as $crate::datum::FromOptionalDatum>::from_optional_datum(datum);
-            )*
-        }
-        $(let $fcinfo: &mut $crate::FunctionCallInfoData = $fc;)?
-    }
-}
-
 pub fn get_args<'a>(
     fcinfo: &'a FunctionCallInfoData
 ) -> impl 'a + Iterator<Item = Option<postgres_headers_rs::Datum>> {
@@ -221,6 +204,47 @@ pub fn get_args<'a>(
 
 //     result
 // }
+
+
+/// try executing a closure, running `pre_re_throw` in the event that the
+/// closure throws a postgres exception.
+#[cfg(unix)]
+#[inline(never)]
+pub unsafe fn pg_try_re_throw<R, F: FnOnce() -> R, G: FnOnce()>(
+    f: F, pre_re_throw: G
+) -> R {
+    // setup the check protection
+    let original_exception_stack: *mut pg_sys::sigjmp_buf = pg_sys::PG_exception_stack;
+    let mut local_exception_stack: mem::MaybeUninit<pg_sys::sigjmp_buf> =
+        mem::MaybeUninit::uninit();
+    let jumped = pg_sys::sigsetjmp(
+        // grab a mutable reference, cast to a mutabl pointr, then case to the expected erased pointer type
+        local_exception_stack.as_mut_ptr() as *mut pg_sys::sigjmp_buf as *mut _,
+        1,
+    );
+    // now that we have the local_exception_stack, we set that for any PG longjmps...
+
+    if jumped != 0 {
+        pg_sys::PG_exception_stack = original_exception_stack;
+
+        // The C Panicked!, handling control to Rust Panic handler
+        compiler_fence(Ordering::SeqCst);
+        pre_re_throw();
+        pg_sys::pg_re_throw();
+    }
+
+    // replace the exception stack with ours to jump to the above point
+    pg_sys::PG_exception_stack = local_exception_stack.as_mut_ptr() as *mut _;
+
+    // enforce that the setjmp is not reordered, though that's probably unlikely...
+    compiler_fence(Ordering::SeqCst);
+    let result = f();
+
+    compiler_fence(Ordering::SeqCst);
+    pg_sys::PG_exception_stack = original_exception_stack;
+
+    result
+}
 
 #[cfg(test)]
 mod tests {
