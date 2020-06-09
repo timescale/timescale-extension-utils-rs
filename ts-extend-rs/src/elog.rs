@@ -78,11 +78,11 @@ pub fn __private_api_log(
         ).expect("this should not fail: msg");
 
         unsafe {
-            // crate::guard_pg(|| {
+            crate::guard_pg(|| {
                 compiler_fence(Ordering::SeqCst);
                 let msg_result = pg_sys::errmsg(c_msg.as_ptr());
                 pg_sys::errfinish(msg_result);
-            // });
+            });
         }
     }
 }
