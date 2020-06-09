@@ -2,9 +2,13 @@
 use std::{
     any::Any,
     mem,
-    sync::atomic::{
-        compiler_fence,
-        Ordering,
+    panic,
+    sync::{
+        atomic::{
+            compiler_fence,
+            Ordering,
+        },
+        Once,
     },
 };
 
@@ -154,14 +158,14 @@ pub fn handle_unwind(err: Box<dyn Any + Send + 'static>) -> ! {
     }
 
     if let Some(msg) = err.downcast_ref::<&'static str>() {
-        crate::elog!(Error, "internal panic in '{}': {}", stringify!($name), msg);
+        crate::elog!(Error, "internal panic: {}", msg);
     }
 
     if let Some(msg) = err.downcast_ref::<String>() {
-        crate::elog!(Error, "internal panic in '{}': {}", stringify!($name), msg);
+        crate::elog!(Error, "internal panic: {}", msg);
     }
 
-    crate::elog!(Error, "internal panic in '{}'", stringify!(#func_name));
+    crate::elog!(Error, "internal panic");
     unreachable!("log should have longjmped above, this is a bug in ts-extend-rs");
 }
 
@@ -197,10 +201,28 @@ pub unsafe fn guard_pg<R, F: FnOnce() -> R>(f: F) -> R {
     // now that we have the local_exception_stack, we set that for any PG longjmps...
 
     if jumped != 0 {
+
         pg_sys::PG_exception_stack = original_exception_stack;
 
         // The C Panicked!, handling control to Rust Panic handler
         compiler_fence(Ordering::SeqCst);
+
+        // if this is the first time we've caught a postgres error, set a panic
+        // hook so rust does not print an additional panic for the error.
+        static SET_PANIC_HOOK: Once = Once::new();
+        SET_PANIC_HOOK.call_once(|| {
+            let default_handler = panic::take_hook();
+            let our_handler: Box<dyn Fn(&panic::PanicInfo<'_>) + Sync + Send> =
+                Box::new(move |info| {
+                    match info.payload().downcast_ref::<PGError>() {
+                        // for pg errors postgres will handle the output
+                        Some(_) => {},
+                        // other errors we still output
+                        None => default_handler(info),
+                    }
+                });
+            panic::set_hook(our_handler);
+        });
         panic!(PGError);
     }
 
