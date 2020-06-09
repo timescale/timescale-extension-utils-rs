@@ -1,7 +1,7 @@
 
 use std::{
     alloc::{GlobalAlloc, Layout},
-    ptr::NonNull,
+    ptr::{NonNull, null_mut},
     marker::PhantomData,
 };
 
@@ -72,7 +72,8 @@ impl<T: ?Sized> std::ops::DerefMut for Pox<T> {
 pub unsafe fn in_context<T, F>(context: MemoryContext, f: F) -> T
 where F: FnOnce() -> T {
     // we need a variable her so the guard lives to the end of this scope
-    let _guard = MemoryContextGuard(context);
+    let _guard = MemoryContextGuard(GLOBAL.0);
+    GLOBAL.0 = context;
     f()
 }
 
@@ -83,14 +84,15 @@ pub struct MemoryContextGuard(pub MemoryContext);
 impl Drop for MemoryContextGuard {
     fn drop(&mut self) {
         unsafe {
-            memory_context_switch_to(self.0);
+            GLOBAL.0 = self.0;
         }
     }
 }
 
 /// switch `CurrentMemoryContext` to a given context, returning the old memory
 /// contect. It is recommended that `in_context()` be used instead, as that
-/// function handles switching the memory context back on panic.
+/// function will switch only the rust MemoryContext, and handles switching the
+/// memory context back on panic.
 pub unsafe fn memory_context_switch_to(context: MemoryContext) -> MemoryContext {
     let old = CurrentMemoryContext;
     CurrentMemoryContext = context;
@@ -98,9 +100,9 @@ pub unsafe fn memory_context_switch_to(context: MemoryContext) -> MemoryContext 
 }
 
 #[global_allocator]
-static GLOBAL: PallocAllocator = PallocAllocator;
+static mut GLOBAL: PallocAllocator = PallocAllocator(null_mut());
 
-struct PallocAllocator;
+struct PallocAllocator(MemoryContext);
 
 extern "C" {
     pub static mut TopTransactionContext: MemoryContext;
@@ -118,8 +120,13 @@ extern "C" {
 /// transactions, so it should be fairly rare we get memory freed out from under
 /// us, but the memory will be freed if the transaction aborts.
 unsafe impl GlobalAlloc for PallocAllocator {
+    //FIXME allow for switching the memory context allocated in
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        MemoryContextAlloc(TopTransactionContext, layout.size() as _)  as *mut _
+        let mut mctx = TopTransactionContext;
+        if GLOBAL.0 != null_mut() {
+            mctx = GLOBAL.0;
+        }
+        MemoryContextAlloc(mctx, layout.size() as _)  as *mut _
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
@@ -127,7 +134,11 @@ unsafe impl GlobalAlloc for PallocAllocator {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        MemoryContextAllocZero(TopTransactionContext, layout.size() as _)  as *mut _
+        let mut mctx = TopTransactionContext;
+        if GLOBAL.0 != null_mut() {
+            mctx = GLOBAL.0;
+        }
+        MemoryContextAllocZero(mctx, layout.size() as _)  as *mut _
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
