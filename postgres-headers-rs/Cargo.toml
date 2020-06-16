@@ -12,5 +12,8 @@ parse_headers = ["bindgen"]
 
 [dependencies]
 
-[build-dependencies]
-bindgen = { version = "0.54", optional = true }
+[build-dependencies.bindgen]
+optional = true
+version = "0.54"
+default-features = false
+features = ["runtime"]
