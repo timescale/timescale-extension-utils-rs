@@ -17,7 +17,7 @@ mod generated {
 
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
     extern "C" {
         #[link_name = "__sigsetjmp"]
         pub fn sigsetjmp(env: *mut sigjmp_buf, savemask: c_int) -> c_int;
