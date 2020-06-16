@@ -6,3 +6,7 @@ edition = "2018"
 
 [dependencies]
 postgres-headers-rs = {version = "*", path = "../postgres-headers-rs"}
+
+[features]
+default = []
+parse_headers = ["postgres-headers-rs/parse_headers"]

@@ -1,25 +1,25 @@
 #![allow(nonstandard_style)]
 #![allow(improper_ctypes)]
 
-#[cfg(target_os = "linux")]
-use std::os::raw::c_int;
+#[cfg(not(feature = "parse_headers"))]
+pub use cached::*;
 
-// TODO version selection
-// TODO should we have a separate linux_musl_pgN target?
-#[cfg(target_os = "linux")]
-pub use linux_glibc_pg12::*;
+#[cfg(feature = "parse_headers")]
+pub use generated::*;
 
-#[cfg(target_os = "macos")]
-pub use macos_pg12::*;
+#[cfg(not(feature = "parse_headers"))]
+mod cached;
 
-#[cfg(target_os = "linux")]
-mod linux_glibc_pg12;
+#[cfg(feature = "parse_headers")]
+mod generated {
+    #[cfg(target_os = "linux")]
+    use std::os::raw::c_int;
 
-#[cfg(target_os = "macos")]
-mod macos_pg12;
+    include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 
-#[cfg(target_os = "linux")]
-extern "C" {
-    #[link_name = "__sigsetjmp"]
-    pub fn sigsetjmp(env: *mut sigjmp_buf, savemask: c_int) -> c_int;
+    #[cfg(target_os = "linux")]
+    extern "C" {
+        #[link_name = "__sigsetjmp"]
+        pub fn sigsetjmp(env: *mut sigjmp_buf, savemask: c_int) -> c_int;
+    }
 }
