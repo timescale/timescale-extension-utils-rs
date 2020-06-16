@@ -12,7 +12,7 @@ use std::{
     },
 };
 
-pub use postgres_headers_rs as pg_sys;
+pub use postgres_headers_rs::sys as pg_sys;
 pub mod datum;
 pub mod elog;
 pub mod palloc;
@@ -127,7 +127,7 @@ macro_rules! pg_fn_body {
 
 pub fn get_args<'a>(
     fcinfo: &'a FunctionCallInfoData
-) -> impl 'a + Iterator<Item = Option<postgres_headers_rs::Datum>> {
+) -> impl 'a + Iterator<Item = Option<pg_sys::Datum>> {
     let num_args = fcinfo.nargs as usize;
 
     //TODO pg version

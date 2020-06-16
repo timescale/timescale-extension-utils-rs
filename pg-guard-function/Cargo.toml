@@ -1,0 +1,12 @@
+[package]
+name = "pg-guard-function"
+version = "0.1.0"
+authors = ["Joshua Lockerman <josh@timescale.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = { version = "1.0", features = ["full"] }

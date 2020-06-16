@@ -8,9 +8,14 @@ build = "build.rs"
 
 [features]
 default = []
-parse_headers = ["bindgen"]
+parse_headers = ["bindgen", "pg-guard-function"]
 
 [dependencies]
+
+[dependencies.pg-guard-function]
+optional = true
+version = "*"
+path = "../pg-guard-function"
 
 [build-dependencies.bindgen]
 optional = true

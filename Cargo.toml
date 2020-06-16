@@ -3,6 +3,7 @@ debug = true
 
 [workspace]
 members = [
+    "pg-guard-function",
     "postgres-headers-rs",
     "timescale-extension-utils",
 ]

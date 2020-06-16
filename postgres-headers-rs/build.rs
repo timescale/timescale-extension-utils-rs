@@ -6,10 +6,14 @@ fn main() {
 #[cfg(feature = "parse_headers")]
 mod parse_headers {
     //based on https://github.com/bluejekyll/pg-extend-rs/blob/a8d637ca83475905b4799fbd123455c97b949a4a/pg-extend/build.rs
-    use std::collections::HashSet;
-    use std::env;
-    use std::path::PathBuf;
-    use std::process::Command;
+    use std::{
+        collections::HashSet,
+        env,
+        fs::OpenOptions,
+        io::{BufWriter, Write},
+        path::PathBuf,
+        process::Command,
+    };
 
     pub fn main() {
         let out_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("generated.rs");
@@ -40,13 +44,17 @@ mod parse_headers {
         );
 
         let bindings = get_bindings(&pg_include) // Gets initial bindings that are OS-dependant
-        // The input header we would like to generate
-        // bindings for.
-        .header("wrapper.h")
-        .parse_callbacks(Box::new(ignored_macros))
-        .rustfmt_bindings(true)
-        // FIXME: add this back
-        .layout_tests(false);
+            // The input header we would like to generate
+            // bindings for.
+            .header("wrapper.h")
+            .parse_callbacks(Box::new(ignored_macros))
+            .rustfmt_bindings(true)
+            .raw_line(r##"#[cfg(target_os = "linux")] use std::os::raw::c_int;"##)
+            .raw_line(r##"#[cfg(all(target_os = "linux", target_env = "gnu"))] use crate::sigsetjmp;"##)
+            // this function causes a error: function parameters cannot shadow statics
+            .blacklist_function("XLogReaderAllocate")
+            // TODO: add this back?
+            .layout_tests(false);
 
         // Finish the builder and generate the bindings.
         let bindings = bindings
@@ -54,10 +62,20 @@ mod parse_headers {
             // Unwrap the Result and panic on failure.
             .expect("Unable to generate bindings");
 
+        let file = OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .create(true)
+            .open(out_path)
+            .expect("could not open bindings file");
+        let mut file = BufWriter::new(file);
+        file.write_all(b"#[pg_guard_function::pg_guard_function] pub mod bindgenerated {\n")
+            .expect("cannot write mod");
         // Write the bindings to the $OUT_DIR/postgres.rs file.
         bindings
-            .write_to_file(out_path)
+            .write(Box::new(&mut file))
             .expect("Couldn't write bindings!");
+        file.write_all(b"}\n").expect("cannot write");
     }
 
     #[cfg(windows)]
