@@ -50,7 +50,7 @@ mod parse_headers {
             .parse_callbacks(Box::new(ignored_macros))
             .rustfmt_bindings(true)
             .raw_line(r##"#[cfg(target_os = "linux")] use std::os::raw::c_int;"##)
-            .raw_line(r##"#[cfg(all(target_os = "linux", target_env = "gnu"))] use crate::sigsetjmp;"##)
+            .raw_line(r##"#[cfg(all(target_os = "linux", target_env = "gnu"))] use super::sigsetjmp;"##)
             // this function causes a error: function parameters cannot shadow statics
             .blacklist_function("XLogReaderAllocate")
             // TODO: add this back?
