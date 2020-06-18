@@ -82,7 +82,8 @@ impl PGError {
     pub unsafe fn re_throw(&self) -> ! {
         crate::sys::pg_re_throw();
         // this should not be reachable due to the above rethrow
-        unreachable!("we should not be able to continue execution after a rethrow")
+        eprintln!("we should not be able to continue execution after a rethrow");
+        std::process::abort()
     }
 }
 
