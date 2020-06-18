@@ -78,11 +78,9 @@ pub fn __private_api_log(
         ).expect("this should not fail: msg");
 
         unsafe {
-            crate::guard_pg(|| {
-                compiler_fence(Ordering::SeqCst);
-                let msg_result = sys::errmsg(c_msg.as_ptr());
-                sys::errfinish(msg_result);
-            });
+            compiler_fence(Ordering::SeqCst);
+            let msg_result = sys::errmsg(c_msg.as_ptr());
+            sys::errfinish(msg_result);
         }
     }
 }
