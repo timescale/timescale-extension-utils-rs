@@ -11,6 +11,8 @@ use std::{
     },
 };
 
+pub use postgres_headers_rs;
+
 pub use postgres_headers_rs::elog;
 
 pub use postgres_headers_rs::sys as pg_sys;
