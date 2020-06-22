@@ -33,6 +33,24 @@ impl From<Level> for c_int {
 /// [`Level` enum]: enum.Level.html
 #[macro_export]
 macro_rules! elog {
+    ($lvl:expr, $($arg:tt)+) => (unsafe {
+        $crate::guard_pg(||
+            $crate::elog::__private_api_log(
+                format_args!($($arg)+),
+                $lvl,
+                &(
+                    // Construct zero-terminated strings at compile time.
+                    concat!(module_path!(), "\0") as *const str as *const ::std::os::raw::c_char,
+                    concat!(file!(), "\0") as *const str as *const ::std::os::raw::c_char,
+                    line!(),
+                ),
+            )
+        );
+    });
+}
+
+#[macro_export]
+macro_rules! unguarded_elog {
     ($lvl:expr, $($arg:tt)+) => ({
         $crate::elog::__private_api_log(
             format_args!($($arg)+),

@@ -66,10 +66,18 @@ fn wrap_function(foreign: ItemForeignMod) -> Item {
         attrs: vec![],
         vis: VisPublic{pub_token: <Token!(pub)>::default()}.into(),
         sig: signature,
-        block: Box::new(parse_quote!({
-            #foreign;
-            crate::guard_pg(|| #name(#(#args),*) )
-        })),
+        // certain functions should never be wrapped as it would render them useless
+        block: if name != "pg_re_throw" && name != "errfinish" && name != "errstart" {
+            Box::new(parse_quote!({
+                #foreign;
+                crate::guard_pg(|| #name(#(#args),*) )
+            }))
+        } else {
+            Box::new(parse_quote!({
+                #foreign;
+                #name(#(#args),*)
+            }))
+        },
     };
 
     Item::Fn(i)

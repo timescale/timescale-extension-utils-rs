@@ -62,14 +62,14 @@ pub fn handle_unwind(err: Box<dyn Any + Send + 'static>) -> ! {
     }
 
     if let Some(msg) = err.downcast_ref::<&'static str>() {
-        crate::elog!(Error, "internal panic: {}", msg);
+        crate::unguarded_elog!(Error, "internal panic: {}", msg);
     }
 
     if let Some(msg) = err.downcast_ref::<String>() {
-        crate::elog!(Error, "internal panic: {}", msg);
+        crate::unguarded_elog!(Error, "internal panic: {}", msg);
     }
 
-    crate::elog!(Error, "internal panic");
+    crate::unguarded_elog!(Error, "internal panic");
     unreachable!("log should have longjmped above, this is a bug in ts-extend-rs");
 }
 
@@ -133,6 +133,8 @@ fn handle_pg_unwind() -> ! {
     // if this is the first time we've caught a postgres error, set a panic
     // hook so rust does not print an additional panic for the error.
     static SET_PANIC_HOOK: Once = Once::new();
+    //FIXME this needs to be in TopMemoryContext, or somewhere else it'll live
+    //      the entire life of the process...
     SET_PANIC_HOOK.call_once(|| {
         let default_handler = panic::take_hook();
         let our_handler: Box<dyn Fn(&panic::PanicInfo<'_>) + Sync + Send> =
