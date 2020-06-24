@@ -33,7 +33,7 @@ impl From<Level> for c_int {
 /// [`Level` enum]: enum.Level.html
 #[macro_export]
 macro_rules! elog {
-    ($lvl:expr, $($arg:tt)+) => ({
+    (#unguarded $lvl:expr, $($arg:tt)+) => ({
         $crate::elog::__private_api_log(
             format_args!($($arg)+),
             $lvl,
@@ -44,6 +44,9 @@ macro_rules! elog {
                 line!(),
             ),
         );
+    });
+    ($lvl:expr, $($arg:tt)+) => ({
+        unsafe { $crate::guard_pg(|| $crate::elog!(#unguarded $lvl, $($arg)+)) }
     });
 }
 
@@ -78,11 +81,9 @@ pub fn __private_api_log(
         ).expect("this should not fail: msg");
 
         unsafe {
-            crate::guard_pg(|| {
-                compiler_fence(Ordering::SeqCst);
-                let msg_result = pg_sys::errmsg(c_msg.as_ptr());
-                pg_sys::errfinish(msg_result);
-            });
+            compiler_fence(Ordering::SeqCst);
+            let msg_result = pg_sys::errmsg(c_msg.as_ptr());
+            pg_sys::errfinish(msg_result);
         }
     }
 }

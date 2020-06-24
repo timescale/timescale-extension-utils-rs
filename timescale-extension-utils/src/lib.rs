@@ -158,14 +158,14 @@ pub fn handle_unwind(err: Box<dyn Any + Send + 'static>) -> ! {
     }
 
     if let Some(msg) = err.downcast_ref::<&'static str>() {
-        crate::elog!(Error, "internal panic: {}", msg);
+        crate::elog!(#unguarded Error, "internal panic: {}", msg);
     }
 
     if let Some(msg) = err.downcast_ref::<String>() {
-        crate::elog!(Error, "internal panic: {}", msg);
+        crate::elog!(#unguarded Error, "internal panic: {}", msg);
     }
 
-    crate::elog!(Error, "internal panic");
+    crate::elog!(#unguarded Error, "internal panic");
     unreachable!("log should have longjmped above, this is a bug in ts-extend-rs");
 }
 
