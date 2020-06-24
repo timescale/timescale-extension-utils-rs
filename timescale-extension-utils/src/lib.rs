@@ -28,6 +28,7 @@ macro_rules! pg_fn {
         $(#[no_mangle]
         pub extern "C" fn $name(fcinfo: $crate::pg_sys::FunctionCallInfo) -> $crate::pg_sys::Datum {
             // use a direct deref since this must always be set, and we can't risk a panic
+            #[allow(unused_unsafe)]
             unsafe {
                 $crate::palloc::in_context($crate::pg_sys::CurrentMemoryContext, || {
                     let fcinfo = &mut *fcinfo;
@@ -95,8 +96,21 @@ macro_rules! pg_fn_body {
                         .map(|p| Pox::from_raw_unchecked(p));
                 )?
                 $(
-                    let datum = args.next().expect("not enough arguments for function");
-                    $arg = <$typ as FromOptionalDatum>::from_optional_datum(datum);
+                    let datum = args.next().unwrap_or_else(|| {
+                        $crate::elog!(Error,
+                            concat!("missing argument \"", stringify!($arg), "\""));
+                        unreachable!()
+                    });
+                    $arg = <$typ as FromOptionalDatum>::try_from_optional_datum(datum)
+                        .unwrap_or_else(|| {
+                            $crate::elog!(Error,
+                                concat!("NULL value for non-nullable argument \"",
+                                    stringify!($arg),
+                                    "\""
+                                )
+                            );
+                            unreachable!()
+                        });
                 )*
             }
             $(let $fcinfo: &mut $crate::FunctionCallInfoData = $fc;)?

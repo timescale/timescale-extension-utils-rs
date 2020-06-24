@@ -6,8 +6,11 @@ use crate::{
     pg_sys::Datum
 };
 
-pub trait FromOptionalDatum {
-    fn from_optional_datum(datum: Option<Datum>) -> Self;
+pub trait FromOptionalDatum: Sized {
+    fn from_optional_datum(datum: Option<Datum>) -> Self {
+        Self::try_from_optional_datum(datum).expect("tried to convert NULL into non-nullable value")
+    }
+    fn try_from_optional_datum(datum: Option<Datum>) -> Option<Self>;
 }
 
 pub trait ToOptionalDatum {
@@ -23,11 +26,8 @@ pub trait ToDatum {
 }
 
 impl<T: FromDatum> FromOptionalDatum for T {
-    fn from_optional_datum(datum: Option<Datum>) -> Self {
-        match datum {
-            Some(datum) => Self::from_datum(datum),
-            None => panic!("tried to convert NULL into non-nullable value"),
-        }
+    fn try_from_optional_datum(datum: Option<Datum>) -> Option<Self> {
+        datum.map(Self::from_datum)
     }
 }
 
@@ -40,6 +40,9 @@ impl<T: ToDatum> ToOptionalDatum for T {
 impl<T: FromDatum> FromOptionalDatum for Option<T> {
     fn from_optional_datum(datum: Option<Datum>) -> Self {
         datum.map(<T as FromDatum>::from_datum)
+    }
+    fn try_from_optional_datum(datum: Option<Datum>) -> Option<Self> {
+        Some(Self::from_optional_datum(datum))
     }
 }
 
