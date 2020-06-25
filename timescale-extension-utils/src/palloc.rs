@@ -104,6 +104,7 @@ static mut GLOBAL: PallocAllocator = PallocAllocator(null_mut());
 struct PallocAllocator(MemoryContext);
 
 extern "C" {
+    pub static mut TopMemoryContext: MemoryContext;
     pub static mut TopTransactionContext: MemoryContext;
 }
 

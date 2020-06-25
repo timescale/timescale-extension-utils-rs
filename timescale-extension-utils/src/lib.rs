@@ -226,16 +226,18 @@ pub unsafe fn guard_pg<R, F: FnOnce() -> R>(f: F) -> R {
         static SET_PANIC_HOOK: Once = Once::new();
         SET_PANIC_HOOK.call_once(|| {
             let default_handler = panic::take_hook();
-            let our_handler: Box<dyn Fn(&panic::PanicInfo<'_>) + Sync + Send> =
-                Box::new(move |info| {
-                    match info.payload().downcast_ref::<PGError>() {
-                        // for pg errors postgres will handle the output
-                        Some(_) => {},
-                        // other errors we still output
-                        None => default_handler(info),
-                    }
-                });
-            panic::set_hook(our_handler);
+            palloc::in_context(palloc::TopMemoryContext, || {
+                let our_handler: Box<dyn Fn(&panic::PanicInfo<'_>) + Sync + Send> =
+                    Box::new(move |info| {
+                        match info.payload().downcast_ref::<PGError>() {
+                            // for pg errors postgres will handle the output
+                            Some(_) => {},
+                            // other errors we still output
+                            None => default_handler(info),
+                        }
+                    });
+                panic::set_hook(our_handler);
+            })
         });
         panic!(PGError);
     }
