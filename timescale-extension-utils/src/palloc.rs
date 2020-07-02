@@ -1,18 +1,25 @@
 
 use std::{
     alloc::{GlobalAlloc, Layout},
-    ptr::{NonNull, null_mut},
+    mem::replace,
+    ptr::NonNull,
     marker::PhantomData,
 };
 
+pub use crate::pg_sys::CurrentMemoryContext;
+
 use crate::pg_sys::{
-    CurrentMemoryContext,
     MemoryContext,
     MemoryContextAlloc,
     MemoryContextAllocZero,
     pfree,
     repalloc
 };
+
+extern "C" {
+    pub static mut TopMemoryContext: MemoryContext;
+    pub static mut TopTransactionContext: MemoryContext;
+}
 
 /// `Pox` offers the same API as `Box`, except that it is not freed on `drop`,
 /// making it safe to use for e.g. the first argument of an aggregate.
@@ -71,9 +78,9 @@ impl<T: ?Sized> std::ops::DerefMut for Pox<T> {
 pub unsafe fn in_context<T, F>(context: MemoryContext, f: F) -> T
 where F: FnOnce() -> T {
     // we need a variable her so the guard lives to the end of this scope
-    let guard = MemoryContextGuard(GLOBAL.0);
-    GLOBAL.0 = context;
-    crate::pg_try_re_throw(f, || GLOBAL.0 = guard.0)
+    let old = replace(&mut CurrentMemoryContext, context);
+    let _guard = MemoryContextGuard(old);
+    f()
 }
 
 /// this struct will swap the current memory context to the one it contains
@@ -83,7 +90,7 @@ pub struct MemoryContextGuard(pub MemoryContext);
 impl Drop for MemoryContextGuard {
     fn drop(&mut self) {
         unsafe {
-            GLOBAL.0 = self.0;
+            memory_context_switch_to(self.0);
         }
     }
 }
@@ -93,40 +100,29 @@ impl Drop for MemoryContextGuard {
 /// function will switch only the rust MemoryContext, and handles switching the
 /// memory context back on panic.
 pub unsafe fn memory_context_switch_to(context: MemoryContext) -> MemoryContext {
-    let old = CurrentMemoryContext;
-    CurrentMemoryContext = context;
-    old
+    replace(&mut CurrentMemoryContext, context)
 }
 
 #[global_allocator]
-static mut GLOBAL: PallocAllocator = PallocAllocator(null_mut());
+static mut GLOBAL: PallocAllocator = PallocAllocator;
 
-struct PallocAllocator(MemoryContext);
-
-extern "C" {
-    pub static mut TopMemoryContext: MemoryContext;
-    pub static mut TopTransactionContext: MemoryContext;
-}
+struct PallocAllocator;
 
 /// There is an uncomfortable mismatch between rust's memory allocation and
 /// postgres's; rust tries to clean memory by using stack-based destructors,
 /// while postgres does so using arenas. The issue we encounter is that postgres
 /// implements exception-handling using setjmp/longjmp, which will can jump over
 /// stack frames containing rust destructors. To avoid needing to register a
-/// setjmp handler at every call to a postgres function, we want to use
-/// postgres's MemoryContexts to manage memory, even though this is not strictly
-/// speaking safe. As a compromise, bny default use the TransactionContext to
-/// allocate all memory; it is fairly rare we want data to live across
-/// transactions, so it should be fairly rare we get memory freed out from under
-/// us, but the memory will be freed if the transaction aborts.
+/// setjmp handler at every call to a postgres function, we use postgres's
+/// MemoryContexts to manage memory, even though this is not strictly speaking
+/// safe. Though it is tempting to try to get more control over which
+/// MemoryContext we allocate in, there doesn't seem to be way to do so that is
+/// safe in the context of postgres exceptions and doesn't incur the cost of
+/// setjmp
 unsafe impl GlobalAlloc for PallocAllocator {
     //FIXME allow for switching the memory context allocated in
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let mut mctx = TopTransactionContext;
-        if GLOBAL.0 != null_mut() {
-            mctx = GLOBAL.0;
-        }
-        MemoryContextAlloc(mctx, layout.size() as _)  as *mut _
+        MemoryContextAlloc(CurrentMemoryContext, layout.size() as _)  as *mut _
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
@@ -134,11 +130,7 @@ unsafe impl GlobalAlloc for PallocAllocator {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let mut mctx = TopTransactionContext;
-        if GLOBAL.0 != null_mut() {
-            mctx = GLOBAL.0;
-        }
-        MemoryContextAllocZero(mctx, layout.size() as _)  as *mut _
+        MemoryContextAllocZero(CurrentMemoryContext, layout.size() as _)  as *mut _
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, _layout: Layout, new_size: usize) -> *mut u8 {
