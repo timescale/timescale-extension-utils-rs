@@ -71,9 +71,10 @@ impl<T: ?Sized> std::ops::DerefMut for Pox<T> {
 pub unsafe fn in_context<T, F>(context: MemoryContext, f: F) -> T
 where F: FnOnce() -> T {
     // we need a variable her so the guard lives to the end of this scope
-    let guard = MemoryContextGuard(GLOBAL.0);
+    let _guard = MemoryContextGuard(GLOBAL.0);
     GLOBAL.0 = context;
-    crate::pg_try_re_throw(f, || GLOBAL.0 = guard.0)
+    // crate::pg_try_re_throw(f, || GLOBAL.0 = guard.0)
+    f()
 }
 
 /// this struct will swap the current memory context to the one it contains
