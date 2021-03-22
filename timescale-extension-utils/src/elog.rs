@@ -59,6 +59,9 @@ pub fn __private_api_log(
 ) {
     use std::sync::atomic::{compiler_fence, Ordering};
 
+    #[cfg(not(any(feature="pg12", feature="pg13")))]
+    compile_error!("must activate either pg12 or pg13");
+
     let errlevel: c_int = c_int::from(level);
     let line = line as c_int;
     const LOG_DOMAIN: *const c_char = "RUST\0" as *const str as *const c_char;
@@ -69,7 +72,11 @@ pub fn __private_api_log(
     //     crate::guard_pg(|| pg_sys::errstart(errlevel, file, line, module_path, LOG_DOMAIN))
     // };
 
+    #[cfg(feature="pg12")]
     let do_log = unsafe { pg_sys::errstart(errlevel, file, line, module_path, LOG_DOMAIN) };
+
+    #[cfg(feature="pg13")]
+    let do_log = unsafe { pg_sys::errstart(errlevel, LOG_DOMAIN) };
 
     // If errstart returned false, the message won't be seen by anyone; logging will be skipped
     if do_log {
@@ -82,8 +89,11 @@ pub fn __private_api_log(
 
         unsafe {
             compiler_fence(Ordering::SeqCst);
-            let msg_result = pg_sys::errmsg(c_msg.as_ptr());
-            pg_sys::errfinish(msg_result);
+            let _msg_result = pg_sys::errmsg(c_msg.as_ptr());
+            #[cfg(feature="pg12")]
+            pg_sys::errfinish(_msg_result);
+            #[cfg(feature="pg13")]
+            pg_sys::errfinish(file, line, module_path);
         }
     }
 }

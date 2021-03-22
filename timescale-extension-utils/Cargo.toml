@@ -10,3 +10,6 @@ postgres-headers-rs = {version = "*", path = "../postgres-headers-rs"}
 [features]
 default = []
 parse_headers = ["postgres-headers-rs/parse_headers"]
+pg12 = ["parse_headers"]
+pg13 = ["parse_headers"]
+
